@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Callable
 
@@ -12,7 +13,7 @@ WON = "\uc6d0"
 NEW_PRODUCT = "\uc2e0\uc0c1\ud488"
 EVENT = "\ud589\uc0ac"
 EMART24 = "\uc774\ub9c8\ud2b824"
-SEVEN = "\uc138\ube10\uc77c\ub808\ube10"
+NORMAL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36"
 
 
 def _product(
@@ -73,20 +74,19 @@ def crawl_cu(page: Page) -> list[Product]:
                 headers={
                     "Referer": "https://cu.bgfretail.com/event/plus.do?category=event&depth2=1&sf=N",
                     "X-Requested-With": "XMLHttpRequest",
+                    "User-Agent": NORMAL_UA,
                 },
-                timeout=60000,
+                timeout=8000,
             )
             if not response.ok:
                 break
             html = response.text()
-            blocks = re.findall(r"<li[\s\S]*?</li>", html)
+            blocks = re.findall(r'<li[^>]+class=["\'][^"\']*prod_list[^"\']*["\'][\s\S]*?</li>', html)
             page_items: list[Product] = []
             for block in blocks:
-                name = clean_text(_first_match(r'class=["\'][^"\']*prodName[^"\']*["\'][^>]*>([\s\S]*?)</p>', block))
+                name = clean_text(_first_match(r'<div class=["\']name["\']>\s*<p>([\s\S]*?)</p>', block))
                 text = clean_text(block)
-                if not name:
-                    name = re.sub(rf"1\+1|2\+1|3\+1|NEW|BEST|{EVENT}|{NEW_PRODUCT}|[0-9,]+\s*{WON}", " ", text).strip()
-                price = parse_price(_first_match(rf"([0-9,]+)\s*{WON}", text))
+                price = parse_price(_first_match(r'<div class=["\']price["\']>\s*<strong>([0-9,]+)</strong>', block) or _first_match(rf"([0-9,]+)\s*{WON}", text))
                 image = _first_match(r'<img[^>]+src=["\']([^"\']+)["\']', block)
                 product = _product("cu", "CU", name, price, promo_raw or text, absolute_url("https://cu.bgfretail.com", image))
                 if product:
@@ -99,110 +99,101 @@ def crawl_cu(page: Page) -> list[Product]:
 
 
 def crawl_gs25(page: Page) -> list[Product]:
-    url = "https://gs25.gsretail.com/gscvs/ko/products/event-goods"
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    page.goto("https://gs25.gsretail.com/gscvs/ko/products/event-goods", wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(1200)
+    body_text = page.locator("body").inner_text(timeout=5000)
+    if "검색 로봇" in body_text or "차단" in body_text:
+        raise RuntimeError("GS25 blocked the request as bot traffic")
 
-    items = page.locator("li:has(.prod_box)").evaluate_all(
-        """
-        (nodes) => nodes.map((node) => {
-          const name = node.querySelector('.tit')?.textContent?.trim() || node.querySelector('img')?.getAttribute('alt') || '';
-          const price = node.querySelector('.cost')?.textContent?.trim() || '';
-          const promo = node.querySelector('.flag_box')?.textContent?.trim() || '';
-          const imageUrl = node.querySelector('img')?.src || '';
-          return { name, price, promo, imageUrl };
-        })
-        """
-    )
-
+    csrf = _first_match(r"CSRFToken=([0-9a-fA-F-]+)", page.content())
+    if not csrf:
+        csrf = _first_match(r"CSRFToken\s*=\s*['\"]([^'\"]+)", page.content())
+    search_url = f"http://gs25.gsretail.com/gscvs/ko/products/event-goods-search?CSRFToken={csrf}"
+    event_types = [("ONE_TO_ONE", "1+1"), ("TWO_TO_ONE", "2+1"), ("GIFT", "gift")]
     parsed: list[Product] = []
-    for item in items:
-        product = _product("gs25", "GS25", item.get("name", ""), parse_price(item.get("price", "")), item.get("promo", ""), item.get("imageUrl"))
-        if product:
-            parsed.append(product)
+
+    for parameter, fallback_promo in event_types:
+        for page_num in range(1, 40):
+            response = page.request.post(
+                search_url,
+                form={
+                    "pageNum": str(page_num),
+                    "pageSize": "100",
+                    "searchType": "",
+                    "searchWord": "",
+                    "parameterList": parameter,
+                },
+                headers={
+                    "Referer": "http://gs25.gsretail.com/gscvs/ko/products/event-goods",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "User-Agent": NORMAL_UA,
+                },
+                timeout=60000,
+            )
+            if not response.ok:
+                break
+            payload = response.json()
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            rows = payload.get("results", []) if isinstance(payload, dict) else []
+            if not rows:
+                break
+            for row in rows:
+                name = str(row.get("goodsNm") or "")
+                price = int(float(row.get("price") or 0))
+                promo = str(row.get("eventTypeNm") or fallback_promo)
+                image = row.get("attFileNm") or row.get("attFileNmOld")
+                seed = str(row.get("attFileId") or row.get("goodsNm") or name)
+                product = _product("gs25", "GS25", name, price, promo, str(image) if image else None, seed)
+                if product:
+                    parsed.append(product)
+            pagination = payload.get("pagination", {}) if isinstance(payload, dict) else {}
+            total_pages = int(pagination.get("numberOfPages") or pagination.get("totalPages") or 0)
+            if total_pages and page_num >= total_pages:
+                break
+            if len(rows) < 100:
+                break
+
     return _dedupe(parsed)
 
 
 def crawl_emart24(page: Page) -> list[Product]:
-    page.goto("https://emart24.co.kr/goods/event?align=PRICE_DESC&base_category_seq=2&category_seq=1&search=", wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(1200)
     parsed: list[Product] = []
+    base_categories = ["1", "2", "5", "3"]
+    benefit_categories = ["1", "2", "3", "4", "12"]
 
-    for page_no in range(1, 21):
-        cards = page.locator(".itemWrap").evaluate_all(
-            """
-            (nodes) => nodes.map((node) => {
-              const text = node.textContent || '';
-              const imageUrl = node.querySelector('img')?.src || '';
-              return { text, imageUrl };
-            })
-            """
-        )
-        before = len(parsed)
-        for card in cards:
-            text = clean_text(card.get("text", ""))
-            price = parse_price(_first_match(rf"([0-9,]+)\s*{WON}", text))
-            name = re.sub(rf"NEW|{NEW_PRODUCT}|1\s*\+\s*1|2\s*\+\s*1|3\s*\+\s*1|[0-9,]+\s*{WON}", " ", text).strip()
-            product = _product("emart24", EMART24, name, price, text, card.get("imageUrl"))
-            if product:
-                parsed.append(product)
-        if len(parsed) == before:
-            break
-        next_link = page.locator(f"a:has-text('{page_no + 1}')")
-        if next_link.count() != 1:
-            break
-        try:
-            next_link.click(timeout=3000)
-            page.wait_for_timeout(800)
-        except PlaywrightTimeoutError:
-            break
+    for base_category in base_categories:
+        for benefit_category in benefit_categories:
+            url = f"https://emart24.co.kr/goods/event?search=&category_seq={benefit_category}&base_category_seq={base_category}&align=PRICE_DESC"
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(900)
+            except PlaywrightTimeoutError:
+                continue
+
+            cards = page.locator(".itemWrap").evaluate_all(
+                """
+                (nodes) => nodes.map((node) => {
+                  const text = node.textContent || '';
+                  const imageUrl = node.querySelector('img')?.src || '';
+                  return { text, imageUrl };
+                })
+                """
+            )
+            for card in cards:
+                text = clean_text(card.get("text", ""))
+                price = parse_price(_first_match(rf"([0-9,]+)\s*{WON}", text))
+                name = re.sub(rf"NEW|{NEW_PRODUCT}|1\s*\+\s*1|2\s*\+\s*1|3\s*\+\s*1|[0-9,]+\s*{WON}", " ", text).strip()
+                product = _product("emart24", EMART24, name, price, text, card.get("imageUrl"))
+                if product:
+                    parsed.append(product)
 
     return _dedupe(parsed)
 
-
-def crawl_seven(page: Page) -> list[Product]:
-    candidates = [
-        "https://www.7-eleven.co.kr/product/presentList.asp",
-        "http://www.7-eleven.co.kr/product/presentList.asp",
-    ]
-    last_error: Exception | None = None
-    for url in candidates:
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(1500)
-            break
-        except Exception as error:
-            last_error = error
-    else:
-        if last_error:
-            raise last_error
-
-    cards = page.locator("li").evaluate_all(
-        """
-        (nodes) => nodes.map((node) => {
-          const text = node.textContent || '';
-          const imageUrl = node.querySelector('img')?.src || '';
-          return { text, imageUrl };
-        })
-        """
-    )
-
-    parsed: list[Product] = []
-    for card in cards:
-        text = clean_text(card.get("text", ""))
-        if not re.search(rf"1\s*\+\s*1|2\s*\+\s*1|3\s*\+\s*1|{WON}", text):
-            continue
-        price = parse_price(_first_match(rf"([0-9,]+)\s*{WON}", text))
-        name = re.sub(rf"1\s*\+\s*1|2\s*\+\s*1|3\s*\+\s*1|NEW|{NEW_PRODUCT}|[0-9,]+\s*{WON}", " ", text).strip()
-        product = _product("seven", SEVEN, name, price, text, card.get("imageUrl"))
-        if product:
-            parsed.append(product)
-    return _dedupe(parsed)
 
 
 CRAWLERS: dict[RetailerCode, Callable[[Page], list[Product]]] = {
     "cu": crawl_cu,
     "gs25": crawl_gs25,
-    "seven": crawl_seven,
     "emart24": crawl_emart24,
 }

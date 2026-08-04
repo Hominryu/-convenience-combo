@@ -16,41 +16,44 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   try {
     const retailer = String(request.query.retailer ?? '')
     const promotionType = String(request.query.promotionType ?? '')
+    const promotionMap: Record<string, string> = { '1+1': 'ONE_PLUS_ONE', '2+1': 'TWO_PLUS_ONE', '3+1': 'THREE_PLUS_ONE', sale: 'SALE', gift: 'GIFT', new: 'NEW', none: 'NONE' }
+    const dbPromotionType = promotionMap[promotionType] ?? promotionType
     const query = String(request.query.query ?? '').trim()
     const limit = Math.min(Number(request.query.limit ?? 120), 300)
     const filters = [
-      'select=id,name,normalized_name,price,category,tags,image_url,active,retailers!inner(code,name),promotions(promotion_type,purchase_quantity,reward_quantity,discount_price,start_date,end_date,collected_at)',
-      'active=eq.true',
+      'select=id,store_code,original_name,normalized_name,brand_name,price,category,image_url,is_active,last_seen_at,promotions(promotion_type,promotion_price,is_active,start_date,end_date,last_seen_at)',
+      'is_active=eq.true',
       `limit=${limit}`,
-      'order=name.asc',
+      'order=original_name.asc',
     ]
-    if (retailer) filters.push(`retailers.code=eq.${encodeURIComponent(retailer)}`)
-    if (query) filters.push(`name=ilike.*${encodeURIComponent(query)}*`)
+    if (retailer) filters.push(`store_code=eq.${encodeURIComponent(retailer.toUpperCase())}`)
+    if (query) filters.push(`original_name=ilike.*${encodeURIComponent(query)}*`)
     const rows = await supabaseFetch(`products?${filters.join('&')}`) as Array<Record<string, unknown>>
     const products = rows
       .map((row) => {
-        const promotions = Array.isArray(row.promotions) ? row.promotions as Array<Record<string, unknown>> : []
-        const promo = promotions.sort((a, b) => String(b.collected_at ?? '').localeCompare(String(a.collected_at ?? '')))[0]
-        if (!promo) return null
-        if (promotionType && promo.promotion_type !== promotionType) return null
-        const retailerInfo = row.retailers as Record<string, unknown> | undefined
+        const promotions = (Array.isArray(row.promotions) ? row.promotions as Array<Record<string, unknown>> : []).filter((item) => item.is_active !== false)
+        const promo = promotions.sort((a, b) => String(b.last_seen_at ?? '').localeCompare(String(a.last_seen_at ?? '')))[0]
+        if (promotionType && dbPromotionType !== 'NONE' && promo?.promotion_type !== dbPromotionType) return null
+        if (promotionType === 'none' && promo) return null
+        const code = String(row.store_code ?? '').toLowerCase()
+        const categoryMap: Record<string, string> = { MAIN_MEAL:'meal', RAMEN:'meal', RICE:'meal', SANDWICH:'meal', SIDE:'protein', SNACK:'snack', DRINK:'drink', COFFEE:'drink', DESSERT:'dessert', ALCOHOL_SIDE:'snack', ETC:'snack' }
         return {
           id: row.id,
-          retailer: retailerInfo?.code,
-          retailerName: retailerInfo?.name,
-          name: row.name,
+          retailer: code,
+          retailerName: row.store_code,
+          name: row.original_name,
           normalizedName: row.normalized_name,
           price: row.price,
-          category: row.category,
-          tags: row.tags,
+          category: categoryMap[String(row.category)] ?? 'snack',
+          tags: [],
           imageUrl: row.image_url,
-          promotionType: promo.promotion_type,
-          purchaseQuantity: promo.purchase_quantity,
-          rewardQuantity: promo.reward_quantity,
-          discountPrice: promo.discount_price,
-          startDate: promo.start_date,
-          endDate: promo.end_date,
-          collectedAt: promo.collected_at,
+          promotionType: promo?.promotion_type === 'ONE_PLUS_ONE' ? '1+1' : promo?.promotion_type === 'TWO_PLUS_ONE' ? '2+1' : promo?.promotion_type === 'THREE_PLUS_ONE' ? '3+1' : promo?.promotion_type === 'SALE' ? 'sale' : promo?.promotion_type === 'NEW' ? 'new' : 'none',
+          purchaseQuantity: promo?.promotion_type === 'TWO_PLUS_ONE' ? 2 : promo?.promotion_type === 'THREE_PLUS_ONE' ? 3 : 1,
+          rewardQuantity: promo?.promotion_type === 'ONE_PLUS_ONE' ? 2 : promo?.promotion_type === 'TWO_PLUS_ONE' ? 3 : promo?.promotion_type === 'THREE_PLUS_ONE' ? 4 : 1,
+          discountPrice: promo?.promotion_price,
+          startDate: promo?.start_date,
+          endDate: promo?.end_date,
+          collectedAt: promo?.last_seen_at ?? row.last_seen_at,
         }
       })
       .filter(Boolean)

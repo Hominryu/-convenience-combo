@@ -1,8 +1,5 @@
 {
-  "crons": [
-    {
-      "path": "/api/sync-promotions",
-      "schedule": "0 19 * * *"
-    }
-  ]
+  "framework": "vite",
+  "buildCommand": "npm run build:vite",
+  "outputDirectory": "dist"
 }

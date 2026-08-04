@@ -1,71 +1,78 @@
 # 편의점꿀조합
 
-Apps in Toss용 React WebView 미니앱입니다.
+Apps in Toss WebView 미니앱입니다. CU, GS25, 이마트24 상품 데이터를 기준으로 예산 안에서 살 만한 편의점 조합을 추천합니다.
 
-## 첫 출시 범위
+## 현재 지원 범위
 
-- 하단 탭 3개: 홈, 결과, 행사상품
-- 로그인 전 사용: 행사상품 조회, 편의점 한 곳 꿀조합 추천
-- 광고 확장 지점: 다른 조합 보기, 편의점별 비교, 다시 뽑기, 월간 TOP 상품
-- 로그인 확장 지점: 찜, 이전 조합, 행사 알림
-- 제외: 매장별 재고, 지도, 리뷰, 커뮤니티, 술, 담배, 복잡한 구독제
+- 지원 편의점: CU, GS25, 이마트24
+- 제외: 세븐일레븐, 매장별 실시간 재고, 지도, 리뷰, 커뮤니티, 술/담배 추천
+- 데이터: 일반상품 카탈로그와 행사상품 정보를 Supabase에 저장
+- 추천: 프론트엔드 조합 알고리즘으로 결제금액, 받는 수량, 혜택금액, 남는 금액을 계산
 
-## 로컬에서 상품이 적게 보일 때
+## Supabase 초기 설정
 
-`VITE_COMBO_API_BASE_URL`이 없으면 앱은 샘플 상품만 보여줍니다.
+Supabase SQL Editor에서 `supabase/schema.sql` 전체를 한 번 실행합니다. 이제 별도 migration 파일은 사용하지 않습니다.
 
-실제 Supabase/Vercel 데이터를 보려면 `.env.local`에 아래 값을 넣고 dev 서버를 다시 켜세요.
+필요한 GitHub Actions secrets/variables:
+
+```bash
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+```
+
+`SUPABASE_URL`은 GitHub Environment `Production`의 Variable 또는 Repository Secret에 넣을 수 있습니다. `SUPABASE_SERVICE_ROLE_KEY`는 반드시 Secret으로 넣습니다.
+
+## 데이터 수집
+
+행사상품 수집:
+
+```bash
+python crawler/run.py --retailer all --upload
+python crawler/run.py --retailer cu --upload
+python crawler/run.py --retailer gs25 --upload
+python crawler/run.py --retailer emart24 --upload
+```
+
+일반상품 수집:
+
+```bash
+python crawler/run_general.py --store all --upload
+python crawler/run_general.py --store CU --upload
+python crawler/run_general.py --store GS25 --upload
+python crawler/run_general.py --store EMART24 --upload
+```
+
+GitHub Actions에서는 `Promotion Crawler`, `General Product Crawler` 두 워크플로우를 수동 실행할 수 있습니다.
+
+## 상품 조회 API
+
+```bash
+GET /api/products?retailer=cu&limit=120
+GET /api/products?retailer=gs25&limit=120
+GET /api/products?retailer=emart24&limit=120
+GET /api/products?retailer=cu&promotionType=1%2B1
+```
+
+프론트 로컬 테스트에서 운영 API를 보려면 `.env.local`에 넣습니다.
 
 ```bash
 VITE_COMBO_API_BASE_URL=https://convenience-combo.vercel.app
 ```
 
-배포 환경에서는 Vercel 프로젝트의 Environment Variables에 같은 값을 넣어야 합니다.
-
-## 데이터 수집
-
-수집 API는 Vercel Functions에서 실행됩니다.
-
-```bash
-GET /api/sync-promotions
-GET /api/sync-promotions?retailer=cu
-GET /api/sync-promotions?retailer=gs25
-GET /api/sync-promotions?retailer=seven
-GET /api/sync-promotions?retailer=emart24
-```
-
-`SYNC_SECRET`을 설정했다면 아래처럼 호출합니다.
-
-```bash
-GET /api/sync-promotions?secret=YOUR_SYNC_SECRET
-```
-
-## 상품 조회
-
-프론트는 편의점별로 나눠서 상품을 가져옵니다.
-
-```bash
-GET /api/products?retailer=cu&limit=120
-GET /api/products?retailer=gs25&limit=120
-GET /api/products?retailer=seven&limit=120
-GET /api/products?retailer=emart24&limit=120
-```
-
-이렇게 해야 CU처럼 상품 수가 많은 편의점이 전체 목록을 독점해서 다른 편의점 상품이 안 보이는 문제를 줄일 수 있습니다.
-
 ## 계산 방식
 
-- 일반: 1개 결제 -> 1개 획득
-- 1+1: 1개 결제 -> 2개 획득
-- 2+1: 2개 결제 -> 3개 획득
-- 3+1: 3개 결제 -> 4개 획득
+- 일반상품: 1개 결제 -> 1개 받음
+- 1+1: 1개 결제 -> 2개 받음
+- 2+1: 2개 결제 -> 3개 받음
+- 3+1: 3개 결제 -> 4개 받음
 
-앱은 결제금액, 실제 받는 수량, 아낀 금액, 개당 가격, 남은 예산을 분리해서 보여줍니다.
+조합 결과는 결제금액, 받는 수량, 혜택금액, 개당 실질가격, 예산에서 남는 금액을 분리해서 보여줍니다.
 
 ## 개발
 
 ```bash
 npm run dev
 npm run lint
-npm run build
+npm run test
+npm run build:vite
 ```

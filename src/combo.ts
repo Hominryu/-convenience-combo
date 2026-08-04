@@ -172,7 +172,7 @@ export function buildCombosFromProducts(sourceProducts: Product[], retailer: Ret
   const results: ComboResult[] = []
 
   function walk(start: number, picked: ComboItem[], paymentAmount: number) {
-    if (picked.length > 0) {
+    if (picked.length >= 2) {
       const benefitAmount = picked.reduce((sum, item) => sum + item.benefitAmount, 0)
       results.push({
         retailer,
@@ -208,14 +208,14 @@ export function buildCombos(retailer: RetailerCode, budget: number, purpose: Pur
 }
 
 export function buildCrossRetailerBest(budget: number, purpose: Purpose) {
-  return (['cu', 'gs25', 'seven', 'emart24'] as RetailerCode[])
+  return (['cu', 'gs25', 'emart24'] as RetailerCode[])
     .map((retailer) => buildCombos(retailer, budget, purpose, 1)[0])
     .filter(Boolean)
     .sort((a, b) => b.score - a.score)
 }
 
 export function buildCrossRetailerBestFromProducts(sourceProducts: Product[], budget: number, purpose: Purpose) {
-  return (['cu', 'gs25', 'seven', 'emart24'] as RetailerCode[])
+  return (['cu', 'gs25', 'emart24'] as RetailerCode[])
     .map((retailer) => buildCombosFromProducts(sourceProducts, retailer, budget, purpose, 1)[0])
     .filter(Boolean)
     .sort((a, b) => b.score - a.score)

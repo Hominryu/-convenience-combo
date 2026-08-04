@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ResultBannerAd } from './ads/ResultBannerAd'
+import { isRewardedAdEnabled } from './ads/config'
+import { useRewardedAd } from './ads/useRewardedAd'
+import { requestAiCombo } from './aiCombo'
 import { buildCombosFromProducts, buildCrossRetailerBestFromProducts, formatWon, toComboItem, type ComboResult } from './combo'
 import { products, purposes, retailers, type Product, type PromotionType, type Purpose, type RetailerCode } from './data'
 import './index.css'
@@ -82,6 +86,10 @@ function ComboCard({ combo, label }: { combo: ComboResult; label?: string }) {
           <strong>{formatWon(combo.paymentAmount)}</strong>
         </div>
         <div>
+          <span>예산 사용률</span>
+          <strong>{Math.round((combo.paymentAmount / combo.budget) * 100)}%</strong>
+        </div>
+        <div>
           <span>받는 상품</span>
           <strong>{combo.receivedQuantity}개</strong>
         </div>
@@ -112,7 +120,7 @@ function NoticeSlot({ label }: { label: string }) {
   return (
     <div className="notice-slot">
       <strong>{label}</strong>
-      <span>행사 정보는 매장 상황에 따라 달라질 수 있어요.</span>
+      <span>가격과 행사 적용 여부는 매장별로 다를 수 있어요. 최근 확인된 정보를 기준으로 안내해요.</span>
     </div>
   )
 }
@@ -167,9 +175,31 @@ function App() {
   const [filter, setFilter] = useState<PromoFilter>('all')
   const [promoRetailer, setPromoRetailer] = useState<RetailerCode | 'all'>('all')
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [showScrollTop, setShowScrollTop] = useState(false)
   const [sort, setSort] = useState<SortType>('discount')
   const [liveProducts, setLiveProducts] = useState<Product[]>([])
   const [dataStatus, setDataStatus] = useState<DataStatus>('sample')
+  const [aiComboMessage, setAiComboMessage] = useState('')
+  const [aiComboLoading, setAiComboLoading] = useState(false)
+  const [aiComboError, setAiComboError] = useState('')
+  const promoSearchRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 250)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => {
+    if (tab !== 'promos') {
+      setShowScrollTop(false)
+      return undefined
+    }
+    const updateVisibility = () => setShowScrollTop(window.scrollY > 560)
+    updateVisibility()
+    window.addEventListener('scroll', updateVisibility, { passive: true })
+    return () => window.removeEventListener('scroll', updateVisibility)
+  }, [tab])
 
   const productSource = useMemo(() => {
     if (liveProducts.length === 0) return products
@@ -183,6 +213,23 @@ function App() {
   const crossRetailer = useMemo(() => buildCrossRetailerBestFromProducts(productSource, budget, purpose), [productSource, budget, purpose])
   const featuredCombo = useMemo(() => buildCombosFromProducts(productSource, retailer, 5000, 'value', 1)[0], [productSource, retailer])
   const statusText = dataStatusText(dataStatus, productSource)
+  const rewardedAdsEnabled = isRewardedAdEnabled()
+  const rewardedAd = useRewardedAd({
+    enabled: tab === 'result',
+    onCompleted: async () => {
+      if (!selectedCombo || aiComboLoading) return
+      setAiComboLoading(true)
+      setAiComboError('')
+      try {
+        const message = await requestAiCombo({ combo: selectedCombo, retailer, budget, purpose })
+        setAiComboMessage(message)
+      } catch {
+        setAiComboError('맞춤조합을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.')
+      } finally {
+        setAiComboLoading(false)
+      }
+    },
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -278,7 +325,7 @@ function App() {
   }, [])
 
   const promoProducts = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
+    const normalizedQuery = debouncedQuery.trim().toLowerCase()
     return productSource
       .filter((product) => promoRetailer === 'all' || product.retailer === promoRetailer)
       .filter((product) => filter === 'all' || (filter === 'new' ? product.isNew : product.promotionType === filter))
@@ -290,7 +337,7 @@ function App() {
         if (sort === 'new') return b.collectedAt.localeCompare(a.collectedAt)
         return itemB.benefitAmount - itemA.benefitAmount
       })
-  }, [filter, promoRetailer, productSource, query, sort])
+  }, [debouncedQuery, filter, promoRetailer, productSource, sort])
 
   function applyCustomBudget() {
     const nextBudget = Number(customBudget.replace(/[^0-9]/g, ''))
@@ -304,8 +351,19 @@ function App() {
   function searchCombo() {
     applyCustomBudget()
     setComparisonUnlocked(false)
+    setAiComboMessage('')
+    setAiComboError('')
     setTab('result')
   }
+
+  async function handleRewardedAiCombo() {
+    await rewardedAd.show()
+  }
+
+  useEffect(() => {
+    if (tab !== 'result' || !rewardedAd.enabled || rewardedAd.status !== 'IDLE') return
+    void rewardedAd.load()
+  }, [rewardedAd, tab])
 
   return (
     <main className="app-shell">
@@ -401,6 +459,26 @@ function App() {
               <button type="button" onClick={() => setComparisonUnlocked(true)}>편의점별 비교하기</button>
             </section>
 
+            {rewardedAdsEnabled ? (
+              <section className="reward-box">
+                <div>
+                  <p>보너스 추천</p>
+                  <h2>AI가 취향에 맞게 한 번 더 다듬어드릴게요.</h2>
+                </div>
+                <button
+                  type="button"
+                  disabled={!selectedCombo || aiComboLoading || !rewardedAd.canShow}
+                  onClick={handleRewardedAiCombo}
+                >
+                  {rewardedAd.status === 'READY' ? '광고 보고 AI 추천 한 번 더 받기' : '광고를 준비하고 있어요'}
+                </button>
+                {rewardedAd.message ? <span className="reward-status">{rewardedAd.message}</span> : null}
+                {aiComboLoading ? <span className="reward-status">맞춤조합을 정리하고 있어요.</span> : null}
+                {aiComboError ? <span className="reward-status error">{aiComboError}</span> : null}
+                {aiComboMessage ? <p className="ai-combo-message">{aiComboMessage}</p> : null}
+              </section>
+            ) : null}
+
             {comparisonUnlocked ? (
               <section className="content-feed">
                 <h2>편의점별 추천 조합</h2>
@@ -409,6 +487,8 @@ function App() {
                 ))}
               </section>
             ) : null}
+
+            <ResultBannerAd />
           </div>
         ) : null}
 
@@ -421,40 +501,43 @@ function App() {
               </div>
             </header>
 
-            <section className="panel sticky-tools">
-              <div className="segmented five">
+            <section ref={promoSearchRef} className="promo-search" aria-label="행사상품 검색 및 필터">
+              <div className="search-row">
+                <label className="search-field">
+                  <span className="sr-only">상품 검색</span>
+                  <input className="search" value={query} placeholder="상품 검색" onChange={(event) => setQuery(event.currentTarget.value)} />
+                </label>
+                {query ? <button className="search-clear" type="button" onClick={() => setQuery('')} aria-label="검색어 초기화">초기화</button> : null}
+              </div>
+
+              <div className="filter-chips" aria-label="편의점 필터">
+                <button type="button" className={promoRetailer === 'all' ? 'active' : ''} onClick={() => setPromoRetailer('all')}>전체</button>
+                {retailers.map((item) => (
+                  <button key={item.code} type="button" className={promoRetailer === item.code ? 'active' : ''} style={{ '--retailer-color': item.color } as React.CSSProperties} onClick={() => setPromoRetailer(item.code)}>
+                    {item.name}
+                  </button>
+                ))}
+              </div>
+
+              <div className="filter-chips" aria-label="행사 필터">
                 {[
                   ['all', '전체'],
                   ['1+1', '1+1'],
                   ['2+1', '2+1'],
-                  ['sale', '할인'],
-                  ['new', '신상품'],
                 ].map(([value, label]) => (
                   <button key={value} type="button" className={filter === value ? 'active' : ''} onClick={() => setFilter(value as PromoFilter)}>
                     {label}
                   </button>
                 ))}
               </div>
-              <div className="segmented four">
-                <button type="button" className={promoRetailer === 'all' ? 'active' : ''} onClick={() => setPromoRetailer('all')}>전체</button>
-                {retailers.map((item) => (
-                  <button
-                    key={item.code}
-                    type="button"
-                    className={promoRetailer === item.code ? 'active' : ''}
-                    style={{ '--retailer-color': item.color } as React.CSSProperties}
-                    onClick={() => setPromoRetailer(item.code)}
-                  >
-                    {item.name}
-                  </button>
-                ))}
+              <div className="result-controls">
+                <strong aria-live="polite">총 {promoProducts.length}개</strong>
+                <select aria-label="정렬 방식" value={sort} onChange={(event) => setSort(event.currentTarget.value as SortType)}>
+                  <option value="discount">혜택순</option>
+                  <option value="price">낮은 가격순</option>
+                  <option value="new">최근 확인순</option>
+                </select>
               </div>
-              <input className="search" value={query} placeholder="찾는 상품이 있나요?" onChange={(event) => setQuery(event.currentTarget.value)} />
-              <select value={sort} onChange={(event) => setSort(event.currentTarget.value as SortType)}>
-                <option value="discount">아낀 금액 큰 순</option>
-                <option value="price">개당 가격 낮은 순</option>
-                <option value="new">최근 확인 순</option>
-              </select>
             </section>
 
             <section className="product-list">
@@ -463,7 +546,13 @@ function App() {
               ))}
             </section>
 
-            <p className="fixed-notice">매장별 재고와 행사 적용 여부가 다를 수 있어요. 결제 전 매장에서 한 번 더 확인해 주세요. 본 서비스는 각 편의점의 공식 제휴 서비스가 아닙니다.</p>
+            <p className="flow-notice">매장별 재고와 행사 적용 여부가 다를 수 있어요. 결제 전 매장에서 한 번 더 확인해 주세요. 본 서비스는 각 편의점의 공식 제휴 서비스가 아닙니다.</p>
+            <ResultBannerAd />
+            {showScrollTop ? (
+              <button className="scroll-top" type="button" aria-label="행사상품 검색 영역으로 맨 위로 이동" onClick={() => promoSearchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+                맨 위로
+              </button>
+            ) : null}
           </div>
         ) : null}
 
