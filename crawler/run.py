@@ -15,7 +15,7 @@ from supabase_upload import SupabaseClient
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convenience store promotion crawler")
-    parser.add_argument("--retailer", choices=["all", "cu", "gs25", "seven", "emart24"], default="all")
+    parser.add_argument("--retailer", choices=["all", "cu", "gs25", "emart24"], default="all")
     parser.add_argument("--upload", action="store_true", help="Upload collected products to Supabase")
     parser.add_argument("--dry-run", action="store_true", help="Print collection summary without upload")
     parser.add_argument("--headed", action="store_true", help="Run browser in headed mode")
@@ -31,7 +31,7 @@ def write_report(output_path: Path, report: dict) -> None:
 
 def main() -> None:
     args = parse_args()
-    targets: list[RetailerCode] = list(CRAWLERS.keys()) if args.retailer == "all" else [args.retailer]
+    targets: list[RetailerCode] = ["cu", "gs25", "emart24"] if args.retailer == "all" else [args.retailer]
     output_path = Path(args.output)
     uploader = SupabaseClient() if args.upload else None
     report: dict = {"checkedAt": datetime.now(timezone.utc).isoformat(), "results": []}

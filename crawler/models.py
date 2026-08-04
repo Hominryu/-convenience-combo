@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Literal
 
-RetailerCode = Literal["cu", "gs25", "seven", "emart24"]
+RetailerCode = Literal["cu", "gs25", "emart24"]
 PromotionType = Literal["none", "1+1", "2+1", "3+1", "sale", "new", "gift"]
 
 
