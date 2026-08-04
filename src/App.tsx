@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ResultBannerAd } from './ads/ResultBannerAd'
+import { isRewardedAdEnabled } from './ads/config'
+import { useRewardedAd } from './ads/useRewardedAd'
+import { requestAiCombo } from './aiCombo'
 import { buildCombosFromProducts, buildCrossRetailerBestFromProducts, formatWon, toComboItem, type ComboResult } from './combo'
 import { products, purposes, retailers, type Product, type PromotionType, type Purpose, type RetailerCode } from './data'
 import './index.css'
@@ -170,6 +174,9 @@ function App() {
   const [sort, setSort] = useState<SortType>('discount')
   const [liveProducts, setLiveProducts] = useState<Product[]>([])
   const [dataStatus, setDataStatus] = useState<DataStatus>('sample')
+  const [aiComboMessage, setAiComboMessage] = useState('')
+  const [aiComboLoading, setAiComboLoading] = useState(false)
+  const [aiComboError, setAiComboError] = useState('')
 
   const productSource = useMemo(() => {
     if (liveProducts.length === 0) return products
@@ -183,6 +190,23 @@ function App() {
   const crossRetailer = useMemo(() => buildCrossRetailerBestFromProducts(productSource, budget, purpose), [productSource, budget, purpose])
   const featuredCombo = useMemo(() => buildCombosFromProducts(productSource, retailer, 5000, 'value', 1)[0], [productSource, retailer])
   const statusText = dataStatusText(dataStatus, productSource)
+  const rewardedAdsEnabled = isRewardedAdEnabled()
+  const rewardedAd = useRewardedAd({
+    enabled: tab === 'result',
+    onCompleted: async () => {
+      if (!selectedCombo || aiComboLoading) return
+      setAiComboLoading(true)
+      setAiComboError('')
+      try {
+        const message = await requestAiCombo({ combo: selectedCombo, retailer, budget, purpose })
+        setAiComboMessage(message)
+      } catch {
+        setAiComboError('맞춤조합을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.')
+      } finally {
+        setAiComboLoading(false)
+      }
+    },
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -304,8 +328,19 @@ function App() {
   function searchCombo() {
     applyCustomBudget()
     setComparisonUnlocked(false)
+    setAiComboMessage('')
+    setAiComboError('')
     setTab('result')
   }
+
+  async function handleRewardedAiCombo() {
+    await rewardedAd.show()
+  }
+
+  useEffect(() => {
+    if (tab !== 'result' || !rewardedAd.enabled || rewardedAd.status !== 'IDLE') return
+    void rewardedAd.load()
+  }, [rewardedAd, tab])
 
   return (
     <main className="app-shell">
@@ -401,6 +436,26 @@ function App() {
               <button type="button" onClick={() => setComparisonUnlocked(true)}>편의점별 비교하기</button>
             </section>
 
+            {rewardedAdsEnabled ? (
+              <section className="reward-box">
+                <div>
+                  <p>보너스 추천</p>
+                  <h2>AI가 취향에 맞게 한 번 더 다듬어드릴게요.</h2>
+                </div>
+                <button
+                  type="button"
+                  disabled={!selectedCombo || aiComboLoading || !rewardedAd.canShow}
+                  onClick={handleRewardedAiCombo}
+                >
+                  {rewardedAd.status === 'READY' ? '광고 보고 AI 추천 한 번 더 받기' : '광고를 준비하고 있어요'}
+                </button>
+                {rewardedAd.message ? <span className="reward-status">{rewardedAd.message}</span> : null}
+                {aiComboLoading ? <span className="reward-status">맞춤조합을 정리하고 있어요.</span> : null}
+                {aiComboError ? <span className="reward-status error">{aiComboError}</span> : null}
+                {aiComboMessage ? <p className="ai-combo-message">{aiComboMessage}</p> : null}
+              </section>
+            ) : null}
+
             {comparisonUnlocked ? (
               <section className="content-feed">
                 <h2>편의점별 추천 조합</h2>
@@ -409,6 +464,8 @@ function App() {
                 ))}
               </section>
             ) : null}
+
+            <ResultBannerAd />
           </div>
         ) : null}
 

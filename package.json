@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && tsc -p tsconfig.api.json && vite build && ait build",
     "lint": "oxlint",
+    "test": "npm run test:ads",
+    "test:ads": "node scripts/test-ads.mjs",
     "preview": "vite preview",
     "build:vite": "tsc -b && vite build",
     "typecheck:api": "tsc -p tsconfig.api.json",

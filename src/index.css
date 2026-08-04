@@ -467,6 +467,83 @@ select:focus {
   font-size: 13px;
 }
 
+.reward-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 15px;
+  border: 1px solid #e7edf3;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.reward-box p,
+.reward-box h2 {
+  margin: 0;
+}
+
+.reward-box > div p {
+  color: var(--brand-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.reward-box h2 {
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.reward-box button {
+  min-height: 48px;
+  border-radius: 8px;
+  background: #171b20;
+  color: #fff;
+  font-weight: 850;
+}
+
+.reward-box button:disabled {
+  background: #d6dde5;
+  color: #748292;
+}
+
+.reward-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.reward-status.error {
+  color: #d04747;
+}
+
+.ai-combo-message {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: #143726;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.result-banner-ad {
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: height 0.2s ease, margin 0.2s ease, opacity 0.2s ease;
+}
+
+.result-banner-ad.is-visible {
+  height: 96px;
+  margin-top: 20px;
+  opacity: 1;
+}
+
+.result-banner-ad__slot {
+  width: 100%;
+  min-height: 96px;
+}
 .sticky-tools {
   position: sticky;
   top: 0;

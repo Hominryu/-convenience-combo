@@ -11,15 +11,20 @@ from models import Product
 RETAILERS = {
     "cu": "CU",
     "gs25": "GS25",
-    "seven": "세븐일레븐",
-    "emart24": "이마트24",
+    "seven": "\uc138\ube10\uc77c\ub808\ube10",
+    "emart24": "\uc774\ub9c8\ud2b824",
 }
 
 
 class SupabaseClient:
     def __init__(self) -> None:
-        self.base_url = os.environ["SUPABASE_URL"].rstrip("/")
-        self.key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+        service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        if not supabase_url or not service_role_key:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when --upload is used")
+
+        self.base_url = supabase_url.rstrip("/")
+        self.key = service_role_key
         self.rest_url = f"{self.base_url}/rest/v1"
         self.headers = {
             "apikey": self.key,
