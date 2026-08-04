@@ -1,13 +1,36 @@
-import { useMemo, useState } from 'react'
-import { buildCombos, buildCrossRetailerBest, formatWon, toComboItem, type ComboResult } from './combo'
+import { useEffect, useMemo, useState } from 'react'
+import { buildCombosFromProducts, buildCrossRetailerBestFromProducts, formatWon, toComboItem, type ComboResult } from './combo'
 import { products, purposes, retailers, type Product, type PromotionType, type Purpose, type RetailerCode } from './data'
 import './index.css'
 
 type Tab = 'home' | 'result' | 'promos'
 type PromoFilter = 'all' | PromotionType
 type SortType = 'discount' | 'price' | 'new'
+type DataStatus = 'sample' | 'live' | 'loading'
+
+type ApiProduct = {
+  id: string
+  retailer: RetailerCode
+  retailerName?: string
+  name: string
+  price: number
+  category: Product['category']
+  tags: Purpose[]
+  promotionType: Product['promotionType']
+  purchaseQuantity: number
+  rewardQuantity: number
+  discountPrice?: number | null
+  startDate?: string
+  endDate?: string
+  collectedAt?: string
+}
 
 const quickBudgets = [5000, 7000, 10000]
+
+function budgetLabel(value: number) {
+  if (value === 10000) return '1만원'
+  return `${value / 1000}천원`
+}
 
 function retailerName(code: RetailerCode) {
   return retailers.find((retailer) => retailer.code === code)?.name ?? code
@@ -18,16 +41,37 @@ function purposeName(id: Purpose) {
 }
 
 function promoLabel(type: PromotionType) {
-  return type === 'none' ? '일반' : type === 'new' ? '신상품' : type
+  if (type === 'none') return '일반'
+  if (type === 'new') return '신상품'
+  if (type === 'sale') return '할인'
+  return type
+}
+
+function latestCollectedAt(items: Product[]) {
+  return items
+    .map((item) => item.collectedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
+}
+
+function dataStatusText(status: DataStatus, sourceProducts: Product[]) {
+  if (status === 'loading') return '행사 불러오는 중'
+  const latest = latestCollectedAt(sourceProducts)
+  if (status === 'live') return latest ? `최신 행사 기준 · ${latest}` : '최신 행사 기준'
+  return latest ? `기본 상품 기준 · ${latest}` : '기본 상품 기준'
 }
 
 function ComboCard({ combo, label }: { combo: ComboResult; label?: string }) {
+  const retailer = retailers.find((item) => item.code === combo.retailer)
+
   return (
-    <article className="combo-card">
+    <article className="combo-card" style={{ '--retailer-color': retailer?.color ?? '#18a058' } as React.CSSProperties}>
       <header>
         <div>
-          <strong>{label ?? `${retailerName(combo.retailer)} · ${purposeName(combo.purpose)}`}</strong>
-          <span>예산 {formatWon(combo.budget)} 이하</span>
+          <span className="retailer-badge">{retailerName(combo.retailer)}</span>
+          <strong>{label ?? purposeName(combo.purpose)}</strong>
+          <span>{formatWon(combo.budget)} 안에서 골랐어요</span>
         </div>
         <em>{formatWon(combo.leftover)} 남음</em>
       </header>
@@ -38,11 +82,11 @@ function ComboCard({ combo, label }: { combo: ComboResult; label?: string }) {
           <strong>{formatWon(combo.paymentAmount)}</strong>
         </div>
         <div>
-          <span>총 수량</span>
+          <span>받는 상품</span>
           <strong>{combo.receivedQuantity}개</strong>
         </div>
         <div>
-          <span>혜택금액</span>
+          <span>아낀 금액</span>
           <strong>{formatWon(combo.benefitAmount)}</strong>
         </div>
       </div>
@@ -53,10 +97,10 @@ function ComboCard({ combo, label }: { combo: ComboResult; label?: string }) {
             <div>
               <strong>{item.name}</strong>
               <span>
-                {item.paymentQuantity}개 결제 · {item.receivedQuantity}개 획득 · 개당 {formatWon(item.effectiveUnitPrice)}
+                {item.paymentQuantity}개 결제 · {item.receivedQuantity}개 받음 · 개당 {formatWon(item.effectiveUnitPrice)}
               </span>
             </div>
-            <em>{item.promotionType === 'none' ? formatWon(item.paymentAmount) : `${item.promotionType} ${formatWon(item.paymentAmount)}`}</em>
+            <em>{item.promotionType === 'none' ? formatWon(item.paymentAmount) : `${promoLabel(item.promotionType)} ${formatWon(item.paymentAmount)}`}</em>
           </li>
         ))}
       </ul>
@@ -64,26 +108,28 @@ function ComboCard({ combo, label }: { combo: ComboResult; label?: string }) {
   )
 }
 
-function AdSlot({ label }: { label: string }) {
+function NoticeSlot({ label }: { label: string }) {
   return (
-    <div className="ad-slot">
-      <span>AD</span>
+    <div className="notice-slot">
       <strong>{label}</strong>
+      <span>행사 정보는 매장 상황에 따라 달라질 수 있어요.</span>
     </div>
   )
 }
 
 function ProductCard({ product }: { product: Product }) {
   const item = toComboItem(product)
+  const retailer = retailers.find((entry) => entry.code === product.retailer)
 
   return (
-    <article className="product-card">
+    <article className="product-card" style={{ '--retailer-color': retailer?.color ?? '#18a058' } as React.CSSProperties}>
       <header>
         <div>
+          <span className="retailer-badge">{retailerName(product.retailer)}</span>
           <strong>{product.name}</strong>
-          <span>{retailerName(product.retailer)} · {product.brand}</span>
+          <span>{product.brand}</span>
         </div>
-        <button type="button" aria-label={`${product.name} 찜하기`}>찜</button>
+        <span className="promo-chip">{promoLabel(product.promotionType)}</span>
       </header>
       <dl>
         <div>
@@ -91,21 +137,21 @@ function ProductCard({ product }: { product: Product }) {
           <dd>{formatWon(product.price)}</dd>
         </div>
         <div>
-          <dt>행사</dt>
-          <dd>{promoLabel(product.promotionType)}</dd>
-        </div>
-        <div>
-          <dt>획득 수량</dt>
+          <dt>받는 상품</dt>
           <dd>{item.receivedQuantity}개</dd>
         </div>
         <div>
-          <dt>실질가</dt>
+          <dt>개당 가격</dt>
           <dd>{formatWon(item.effectiveUnitPrice)}</dd>
+        </div>
+        <div>
+          <dt>아낀 금액</dt>
+          <dd>{formatWon(item.benefitAmount)}</dd>
         </div>
       </dl>
       <footer>
         <span>{product.startDate} ~ {product.endDate}</span>
-        <span>갱신 {product.collectedAt}</span>
+        <span>{product.collectedAt} 확인</span>
       </footer>
     </article>
   )
@@ -117,19 +163,123 @@ function App() {
   const [budget, setBudget] = useState(7000)
   const [customBudget, setCustomBudget] = useState('')
   const [purpose, setPurpose] = useState<Purpose>('meal')
-  const [rewardUnlocked, setRewardUnlocked] = useState(false)
+  const [comparisonUnlocked, setComparisonUnlocked] = useState(false)
   const [filter, setFilter] = useState<PromoFilter>('all')
   const [promoRetailer, setPromoRetailer] = useState<RetailerCode | 'all'>('all')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortType>('discount')
+  const [liveProducts, setLiveProducts] = useState<Product[]>([])
+  const [dataStatus, setDataStatus] = useState<DataStatus>('sample')
 
-  const combos = useMemo(() => buildCombos(retailer, budget, purpose, 8), [retailer, budget, purpose])
+  const productSource = useMemo(() => {
+    if (liveProducts.length === 0) return products
+    const liveRetailers = new Set(liveProducts.map((product) => product.retailer))
+    const fallbackProducts = products.filter((product) => !liveRetailers.has(product.retailer))
+    return [...liveProducts, ...fallbackProducts]
+  }, [liveProducts])
+
+  const combos = useMemo(() => buildCombosFromProducts(productSource, retailer, budget, purpose, 8), [productSource, retailer, budget, purpose])
   const selectedCombo = combos[0]
-  const crossRetailer = useMemo(() => buildCrossRetailerBest(budget, purpose), [budget, purpose])
+  const crossRetailer = useMemo(() => buildCrossRetailerBestFromProducts(productSource, budget, purpose), [productSource, budget, purpose])
+  const featuredCombo = useMemo(() => buildCombosFromProducts(productSource, retailer, 5000, 'value', 1)[0], [productSource, retailer])
+  const statusText = dataStatusText(dataStatus, productSource)
+
+  useEffect(() => {
+    let cancelled = false
+    import('@apps-in-toss/web-framework')
+      .then(({ User }) => {
+        if (cancelled || !User.getAnonymousKey.isSupported()) return
+        User.getAnonymousKey()
+          .then((result) => localStorage.setItem('combo_user_key', result.hash))
+          .catch(() => undefined)
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let unsubscribeBack: (() => void) | undefined
+    let unsubscribeHome: (() => void) | undefined
+    let cancelled = false
+
+    import('@apps-in-toss/web-framework')
+      .then(({ closeView, graniteEvent }) => {
+        if (cancelled) return
+        unsubscribeBack = graniteEvent.addEventListener('backEvent', {
+          onEvent: () => {
+            if (tab === 'home') {
+              closeView().catch(() => undefined)
+              return
+            }
+            setTab('home')
+          },
+          onError: () => undefined,
+        })
+        unsubscribeHome = graniteEvent.addEventListener('homeEvent', {
+          onEvent: () => setTab('home'),
+          onError: () => undefined,
+        })
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+      unsubscribeBack?.()
+      unsubscribeHome?.()
+    }
+  }, [tab])
+
+  useEffect(() => {
+    const apiBaseUrl = import.meta.env.VITE_COMBO_API_BASE_URL?.replace(/\/$/, '')
+    if (!apiBaseUrl) return
+
+    let cancelled = false
+    setDataStatus('loading')
+    Promise.all(
+      retailers.map((item) =>
+        fetch(`${apiBaseUrl}/api/products?retailer=${item.code}&limit=120`)
+          .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`${item.code} products api failed`))))
+          .then((data: { products?: ApiProduct[] }) => data.products ?? []),
+      ),
+    )
+      .then((groups) => {
+        if (cancelled) return
+        const mapped = groups
+          .flat()
+          .filter((item) => item.retailer && item.name && item.price)
+          .map((item): Product => ({
+            id: item.id,
+            retailer: item.retailer,
+            brand: item.retailerName ?? retailerName(item.retailer),
+            name: item.name,
+            price: item.price,
+            category: item.category,
+            promotionType: item.promotionType,
+            purchaseQuantity: item.purchaseQuantity,
+            rewardQuantity: item.rewardQuantity,
+            discountPrice: item.discountPrice ?? undefined,
+            tags: item.tags,
+            startDate: item.startDate ?? '2026-08-01',
+            endDate: item.endDate ?? '2026-08-31',
+            collectedAt: item.collectedAt ? item.collectedAt.slice(0, 16).replace('T', ' ') : '갱신 대기',
+            isNew: item.promotionType === 'new',
+          }))
+        setLiveProducts(mapped)
+        setDataStatus(mapped.length > 0 ? 'live' : 'sample')
+      })
+      .catch(() => setDataStatus('sample'))
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const promoProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
-    return products
+    return productSource
       .filter((product) => promoRetailer === 'all' || product.retailer === promoRetailer)
       .filter((product) => filter === 'all' || (filter === 'new' ? product.isNew : product.promotionType === filter))
       .filter((product) => !normalizedQuery || product.name.toLowerCase().includes(normalizedQuery) || product.brand.toLowerCase().includes(normalizedQuery))
@@ -140,15 +290,20 @@ function App() {
         if (sort === 'new') return b.collectedAt.localeCompare(a.collectedAt)
         return itemB.benefitAmount - itemA.benefitAmount
       })
-  }, [filter, promoRetailer, query, sort])
+  }, [filter, promoRetailer, productSource, query, sort])
 
   function applyCustomBudget() {
     const nextBudget = Number(customBudget.replace(/[^0-9]/g, ''))
-    if (nextBudget >= 1000) setBudget(nextBudget)
+    if (nextBudget >= 1000) {
+      setBudget(nextBudget)
+      return nextBudget
+    }
+    return budget
   }
 
   function searchCombo() {
-    setRewardUnlocked(false)
+    applyCustomBudget()
+    setComparisonUnlocked(false)
     setTab('result')
   }
 
@@ -158,15 +313,22 @@ function App() {
         {tab === 'home' ? (
           <div className="screen">
             <header className="hero">
-              <p>로그인 없이 바로 쓰는</p>
-              <h1>편의점 꿀조합을 찾아보세요</h1>
+              <span className="data-pill">{statusText}</span>
+              <p>오늘 행사상품 기준</p>
+              <h1>예산에 맞는 조합을 찾아드릴게요</h1>
             </header>
 
             <section className="panel">
-              <h2>편의점</h2>
+              <h2>어디에서 살까요?</h2>
               <div className="segmented four">
                 {retailers.map((item) => (
-                  <button key={item.code} type="button" className={retailer === item.code ? 'active' : ''} onClick={() => setRetailer(item.code)}>
+                  <button
+                    key={item.code}
+                    type="button"
+                    className={retailer === item.code ? 'active' : ''}
+                    style={{ '--retailer-color': item.color } as React.CSSProperties}
+                    onClick={() => setRetailer(item.code)}
+                  >
                     {item.name}
                   </button>
                 ))}
@@ -174,11 +336,11 @@ function App() {
             </section>
 
             <section className="panel">
-              <h2>예산</h2>
+              <h2>얼마까지 쓸까요?</h2>
               <div className="segmented budget">
                 {quickBudgets.map((value) => (
                   <button key={value} type="button" className={budget === value ? 'active' : ''} onClick={() => setBudget(value)}>
-                    {value / 1000}천원
+                    {budgetLabel(value)}
                   </button>
                 ))}
                 <label>
@@ -188,7 +350,7 @@ function App() {
             </section>
 
             <section className="panel">
-              <h2>어떤 조합을 찾으세요?</h2>
+              <h2>어떤 조합이 좋을까요?</h2>
               <div className="purpose-grid">
                 {purposes.map((item) => (
                   <button key={item.id} type="button" className={purpose === item.id ? 'active' : ''} onClick={() => setPurpose(item.id)}>
@@ -196,17 +358,20 @@ function App() {
                   </button>
                 ))}
               </div>
-              <button className="primary" type="button" onClick={searchCombo}>꿀조합 찾기</button>
+              <button className="primary" type="button" onClick={searchCombo}>내 예산에 맞춰보기</button>
             </section>
 
             <section className="content-feed">
-              <h2>바로 보는 꿀정보</h2>
-              <ComboCard combo={buildCombos('cu', 5000, 'value', 1)[0]} label="오늘의 5천원 조합" />
-              <AdSlot label="오늘의 꿀조합 아래 배너" />
+              <div className="section-row">
+                <h2>바로 볼 수 있는 조합</h2>
+                <span>{retailerName(retailer)}</span>
+              </div>
+              {featuredCombo ? <ComboCard combo={featuredCombo} label="5천원으로 맞춘 조합" /> : <div className="empty">지금 보여줄 조합을 준비하고 있어요.</div>}
+              <NoticeSlot label="구매 전 한 번 더 확인해 주세요" />
               <div className="mini-list">
-                <button type="button" onClick={() => { setFilter('1+1'); setTab('promos') }}>이번 달 1+1 베스트</button>
-                <button type="button" onClick={() => { setSort('discount'); setTab('promos') }}>편의점별 할인율 높은 상품</button>
-                <button type="button" onClick={() => { setFilter('new'); setTab('promos') }}>새로 시작한 행사</button>
+                <button type="button" onClick={() => { setFilter('1+1'); setTab('promos') }}>1+1 상품만 보기</button>
+                <button type="button" onClick={() => { setSort('discount'); setTab('promos') }}>아낀 금액이 큰 상품 보기</button>
+                <button type="button" onClick={() => { setFilter('new'); setTab('promos') }}>새로 확인된 상품 보기</button>
               </div>
             </section>
           </div>
@@ -217,29 +382,28 @@ function App() {
             <header className="sub-header">
               <div>
                 <p>{retailerName(retailer)} · {purposeName(purpose)}</p>
-                <h1>예산 {formatWon(budget)} 이하</h1>
+                <h1>{formatWon(budget)} 안에서 골랐어요</h1>
               </div>
-              <button type="button" onClick={() => setTab('home')}>수정</button>
             </header>
 
-            {selectedCombo ? <ComboCard combo={selectedCombo} /> : <div className="empty">조건에 맞는 조합이 없습니다.</div>}
+            {selectedCombo ? <ComboCard combo={selectedCombo} /> : <div className="empty">지금 조건에 맞는 조합을 찾지 못했어요.</div>}
 
             <div className="action-row">
-              <button type="button">이 조합 저장하기</button>
-              <button type="button" onClick={() => setRewardUnlocked(true)}>다른 조합 보기</button>
+              <button type="button" onClick={() => setTab('home')}>다시 고르기</button>
+              <button type="button" onClick={() => setComparisonUnlocked(true)}>편의점별 비교</button>
             </div>
 
-            <AdSlot label="조합 결과 상품 목록 아래 배너" />
+            <NoticeSlot label="결제 전 매장에서 행사 적용 여부를 확인해 주세요" />
 
             <section className="compare-box">
-              <p>현재 {retailerName(retailer)} 조합은 무료로 확인했어요.</p>
-              <h2>CU·GS25·세븐일레븐·이마트24까지 한 번에 비교할까요?</h2>
-              <button type="button" onClick={() => setRewardUnlocked(true)}>광고 보고 4사 비교하기</button>
+              <p>현재 선택한 편의점 기준으로 먼저 보여드렸어요.</p>
+              <h2>다른 편의점 조합도 같이 비교해볼까요?</h2>
+              <button type="button" onClick={() => setComparisonUnlocked(true)}>편의점별 비교하기</button>
             </section>
 
-            {rewardUnlocked ? (
+            {comparisonUnlocked ? (
               <section className="content-feed">
-                <h2>4사 비교 결과</h2>
+                <h2>편의점별 추천 조합</h2>
                 {crossRetailer.map((combo) => (
                   <ComboCard key={combo.retailer} combo={combo} />
                 ))}
@@ -252,8 +416,8 @@ function App() {
           <div className="screen">
             <header className="sub-header">
               <div>
-                <p>4사 행사상품</p>
-                <h1>행사상품</h1>
+                <p>{statusText}</p>
+                <h1>행사상품을 모아봤어요</h1>
               </div>
             </header>
 
@@ -274,29 +438,32 @@ function App() {
               <div className="segmented four">
                 <button type="button" className={promoRetailer === 'all' ? 'active' : ''} onClick={() => setPromoRetailer('all')}>전체</button>
                 {retailers.map((item) => (
-                  <button key={item.code} type="button" className={promoRetailer === item.code ? 'active' : ''} onClick={() => setPromoRetailer(item.code)}>
+                  <button
+                    key={item.code}
+                    type="button"
+                    className={promoRetailer === item.code ? 'active' : ''}
+                    style={{ '--retailer-color': item.color } as React.CSSProperties}
+                    onClick={() => setPromoRetailer(item.code)}
+                  >
                     {item.name}
                   </button>
                 ))}
               </div>
-              <input className="search" value={query} placeholder="상품명을 입력하세요" onChange={(event) => setQuery(event.currentTarget.value)} />
+              <input className="search" value={query} placeholder="찾는 상품이 있나요?" onChange={(event) => setQuery(event.currentTarget.value)} />
               <select value={sort} onChange={(event) => setSort(event.currentTarget.value as SortType)}>
-                <option value="discount">할인율 높은 순</option>
-                <option value="price">가격 낮은 순</option>
-                <option value="new">최신 행사 순</option>
+                <option value="discount">아낀 금액 큰 순</option>
+                <option value="price">개당 가격 낮은 순</option>
+                <option value="new">최근 확인 순</option>
               </select>
             </section>
 
             <section className="product-list">
-              {promoProducts.map((product, index) => (
-                <div key={product.id}>
-                  {index === 8 ? <AdSlot label="행사상품 목록 중간 배너" /> : null}
-                  <ProductCard product={product} />
-                </div>
+              {promoProducts.map((product) => (
+                <ProductCard key={product.id} product={product} />
               ))}
             </section>
 
-            <p className="fixed-notice">매장별 재고와 행사 적용 여부가 다를 수 있어요. 구매 전 매장에서 확인해 주세요.</p>
+            <p className="fixed-notice">매장별 재고와 행사 적용 여부가 다를 수 있어요. 결제 전 매장에서 한 번 더 확인해 주세요. 본 서비스는 각 편의점의 공식 제휴 서비스가 아닙니다.</p>
           </div>
         ) : null}
 

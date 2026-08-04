@@ -36,8 +36,8 @@ export const retailers: Retailer[] = [
 
 export const purposes: Array<{ id: Purpose; label: string }> = [
   { id: 'value', label: '가성비' },
-  { id: 'meal', label: '든든한 한끼' },
-  { id: 'diet', label: '다이어트' },
+  { id: 'meal', label: '든든한 한 끼' },
+  { id: 'diet', label: '가볍게' },
   { id: 'protein', label: '단백질' },
   { id: 'night', label: '야식' },
   { id: 'snack', label: '간식' },
@@ -170,7 +170,7 @@ export const products: Product[] = [
     id: 'gs-fresh-01',
     retailer: 'gs25',
     brand: 'GS25',
-    name: '훈제란 2입',
+    name: '반숙란 2입',
     price: 2300,
     category: 'protein',
     promotionType: 'none',
@@ -199,8 +199,8 @@ export const products: Product[] = [
   {
     id: 'seven-drink-01',
     retailer: 'seven',
-    brand: '다논',
-    name: '액티비아 플레인 210ml',
+    brand: '오뚜기',
+    name: '오트비아 라떼 210ml',
     price: 2200,
     category: 'fresh',
     promotionType: '1+1',
@@ -214,8 +214,8 @@ export const products: Product[] = [
   {
     id: 'seven-milk-01',
     retailer: 'seven',
-    brand: '덴마크',
-    name: '딸기딸기우유 300ml',
+    brand: '이마트',
+    name: '빙그레 딸기우유 300ml',
     price: 2100,
     category: 'drink',
     promotionType: '1+1',
@@ -276,8 +276,8 @@ export const products: Product[] = [
   {
     id: 'emart-choco-01',
     retailer: 'emart24',
-    brand: '옐로우',
-    name: '치즈초꼬미 트러플초콜릿 96g',
+    brand: '제로팜',
+    name: '치즈초코 그래놀라볼 96g',
     price: 4500,
     category: 'dessert',
     promotionType: '1+1',

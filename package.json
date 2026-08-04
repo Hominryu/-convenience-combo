@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && ait build",
+    "build": "tsc -b && tsc -p tsconfig.api.json && vite build && ait build",
     "lint": "oxlint",
     "preview": "vite preview",
     "build:vite": "tsc -b && vite build",
+    "typecheck:api": "tsc -p tsconfig.api.json",
     "deploy": "ait deploy",
     "dev:vite": "vite"
   },
