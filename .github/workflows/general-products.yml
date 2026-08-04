@@ -1,66 +1,51 @@
-name: Promotion Crawler
-
+name: General Product Crawler
 on:
   schedule:
-    - cron: "0 17 * * *"
+    - cron: "17 18 * * 2,5"
   workflow_dispatch:
     inputs:
-      retailer:
-        description: "Retailer to crawl"
+      store:
+        description: Store to crawl
         required: true
-        default: "all"
+        default: all
         type: choice
-        options:
-          - all
-          - cu
-          - gs25
-          - emart24
-
+        options: [all, CU, GS25, EMART24]
 jobs:
   crawl:
     environment: Production
     runs-on: ubuntu-latest
     timeout-minutes: 90
-
     env:
-      # Production 변수 구성을 우선 사용하되, 기존 배포에서 사용하던
-      # repository secret도 호환해 갑작스러운 크롤러 중단을 막는다.
+      # Prefer the Production variable required by the new deployment, while
+      # retaining compatibility with the repository secret used by the old crawler.
       SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
+        with: { python-version: "3.12" }
       - name: Validate Supabase configuration
+        shell: bash
         run: |
           if [ -z "$SUPABASE_URL" ]; then
             echo "::error::SUPABASE_URL is empty. Add Production variable SUPABASE_URL (or the legacy repository secret)."
             exit 1
           fi
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::error::SUPABASE_SERVICE_ROLE_KEY is empty. Add the service_role key in Repository Settings > Secrets and variables > Actions > Secrets."
+            echo "::error::SUPABASE_SERVICE_ROLE_KEY is empty in the Production environment or repository secrets."
             exit 1
           fi
           echo "Supabase configuration is present."
-
-      - name: Install dependencies
+      - name: Install crawler
         working-directory: crawler
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
-
-      - name: Run crawler
-        run: |
-          python crawler/run.py --retailer "${{ github.event.inputs.retailer || 'all' }}" --upload
-
-      - name: Upload crawler report
+      - name: Collect and synchronize independently
+        run: python crawler/run_general.py --store "${{ inputs.store || 'all' }}" --upload
+      - name: Upload per-store report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: crawler-report
-          path: crawler/output/latest.json
+          name: general-product-report
+          path: crawler/output/general-latest.json
