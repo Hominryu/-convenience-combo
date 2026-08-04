@@ -35,6 +35,18 @@ create table if not exists promotions (
   collected_at timestamptz not null default now()
 );
 
+create table if not exists crawler_runs (
+  id uuid primary key default gen_random_uuid(),
+  retailer_code text not null,
+  status text not null,
+  fetched_count integer not null default 0,
+  saved_products integer not null default 0,
+  saved_promotions integer not null default 0,
+  error_message text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz not null default now()
+);
+
 create table if not exists favorites (
   id uuid primary key default gen_random_uuid(),
   user_key text not null,
