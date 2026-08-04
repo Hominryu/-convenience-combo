@@ -6,6 +6,15 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
+HANGUL_RANGE = "\uac00-\ud7a3"
+ONE_PLUS_ONE = "\uc6d0\ud50c\ub7ec\uc2a4\uc6d0"
+TWO_PLUS_ONE = "\ud22c\ud50c\ub7ec\uc2a4\uc6d0"
+THREE_PLUS_ONE = "\uc4f0\ub9ac\ud50c\ub7ec\uc2a4\uc6d0"
+GIFT = "\ub364\uc99d\uc815"
+SALE = "\ud560\uc778"
+KOREAN_SALE = "\uc138\uc77c"
+NEW_PRODUCT = "\uc2e0\uc0c1\ud488"
+
 
 def clean_text(value: str | None) -> str:
     if not value:
@@ -26,8 +35,8 @@ def parse_price(value: str | None) -> int:
 def normalize_name(value: str) -> str:
     value = re.sub(r"\([^)]*\)", " ", value)
     value = re.sub(r"\[[^\]]*\]", " ", value)
-    value = re.sub(r"\d+(\.\d+)?\s?(g|ml|l|kg|개입|입)", " ", value, flags=re.I)
-    value = re.sub(r"[^가-힣a-zA-Z0-9]+", " ", value)
+    value = re.sub(r"\d+(\.\d+)?\s?(g|ml|l|kg|\uac1c\uc785|\uc785)", " ", value, flags=re.I)
+    value = re.sub(rf"[^{HANGUL_RANGE}a-zA-Z0-9]+", " ", value)
     value = re.sub(r"\s+", " ", value)
     return value.strip().lower()
 
@@ -39,17 +48,17 @@ def stable_key(*parts: str) -> str:
 
 def infer_promotion(raw: str) -> tuple[str, int, int]:
     text = re.sub(r"\s+", "", raw)
-    if re.search(r"1\+1|원플러스원", text, re.I):
+    if re.search(rf"1\+1|{ONE_PLUS_ONE}", text, re.I):
         return "1+1", 1, 2
-    if re.search(r"2\+1|투플러스원", text, re.I):
+    if re.search(rf"2\+1|{TWO_PLUS_ONE}", text, re.I):
         return "2+1", 2, 3
-    if re.search(r"3\+1|쓰리플러스원", text, re.I):
+    if re.search(rf"3\+1|{THREE_PLUS_ONE}", text, re.I):
         return "3+1", 3, 4
-    if re.search(r"덤증정|GIFT", text, re.I):
+    if re.search(rf"{GIFT}|GIFT", text, re.I):
         return "gift", 1, 1
-    if re.search(r"할인|SALE|세일", text, re.I):
+    if re.search(rf"{SALE}|SALE|{KOREAN_SALE}", text, re.I):
         return "sale", 1, 1
-    if re.search(r"NEW|신상품", text, re.I):
+    if re.search(rf"NEW|{NEW_PRODUCT}", text, re.I):
         return "new", 1, 1
     return "none", 1, 1
 
@@ -59,22 +68,22 @@ def infer_category_tags(name: str, promotion_type: str) -> tuple[str, list[str]]
     tags = {"value"}
     category = "snack"
 
-    if re.search(r"김밥|삼각|도시락|샌드|버거|라면|컵|우동|국수|비빔|밥", name):
+    if re.search(r"\uae40\ubc25|\uc0bc\uac01|\ub3c4\uc2dc\ub77d|\uc0cc\ub4dc|\ubc84\uac70|\ub77c\uba74|\ucef5|\uc6b0\ub3d9|\uad6d\uc218|\ube44\ube54|\ubc25", name):
         category = "meal"
         tags.update(["meal", "night"])
-    if re.search(r"닭가슴|프로틴|단백|계란|반숙|란|두부|그릭|요거트", name, re.I):
+    if re.search(r"\ub2ed\uac00\uc2b4|\ud504\ub85c\ud2f4|\ub2e8\ubc31|\uacc4\ub780|\ubc18\uc219|\ub780|\ub450\ubd80|\uadf8\ub9ad|\uc694\uac70\ud2b8", name, re.I):
         category = "protein"
         tags.update(["protein", "diet"])
-    if re.search(r"제로|라이트|샐러드|바나나|플레인|저당", name, re.I):
+    if re.search(r"\uc81c\ub85c|\ub77c\uc774\ud2b8|\uc0d0\ub7ec\ub4dc|\ubc14\ub098\ub098|\ud50c\ub808\uc778|\uc800\ub2f9", name, re.I):
         tags.add("diet")
-    if re.search(r"콜라|사이다|생수|우유|커피|음료|주스|물|차|tea|캔", lower, re.I):
+    if re.search(r"\ucf5c\ub77c|\uc0ac\uc774\ub2e4|\uc0dd\uc218|\uc6b0\uc720|\ucee4\ud53c|\uc74c\ub8cc|\uc8fc\uc2a4|\ubb3c|\ucc28|tea|\uce94", lower, re.I):
         if category != "protein":
             category = "drink"
         tags.add("snack")
-    if re.search(r"초콜릿|초코|쿠키|젤리|멘토스|캔디|아이스|크림|케이크|빵", name, re.I):
+    if re.search(r"\ucd08\ucf5c\ub9bf|\ucd08\ucf54|\ucfe0\ud0a4|\uc824\ub9ac|\uba58\ud1a0\uc2a4|\uce94\ub514|\uc544\uc774\uc2a4|\ud06c\ub9bc|\ucf00\uc774\ud06c|\ube75", name, re.I):
         category = "dessert"
         tags.add("snack")
-    if re.search(r"오징어|육포|먹태|칩|과자|닭강정|떡볶이|만두", name, re.I):
+    if re.search(r"\uc624\uc9d5\uc5b4|\uc721\ud3ec|\uba39\ud0dc|\uce69|\uacfc\uc790|\ub2ed\uac15\uc815|\ub5a1\ubcf6\uc774|\ub9cc\ub450", name, re.I):
         category = "snack"
         tags.update(["night", "snack"])
     if promotion_type != "none":
