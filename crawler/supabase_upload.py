@@ -7,11 +7,11 @@ from typing import Any
 import requests
 
 from models import Product
+from sync import sync_catalog
 
 RETAILERS = {
     "cu": "CU",
     "gs25": "GS25",
-    "seven": "\uc138\ube10\uc77c\ub808\ube10",
     "emart24": "\uc774\ub9c8\ud2b824",
 }
 
@@ -123,3 +123,28 @@ class SupabaseClient:
                 }
             ],
         )
+
+    def begin_run(self, store_code: str, crawl_type: str) -> str:
+        rows = self.request("POST", "crawl_runs", headers={"Prefer": "return=representation"}, json={"store_code": store_code, "crawl_type": crawl_type, "status": "RUNNING"})
+        return rows[0]["id"]
+
+    def products_for_store(self, store_code: str) -> list[dict]:
+        return self.request("GET", f"products?store_code=eq.{store_code}&select=id,store_code,source_product_id,normalized_name,capacity")
+
+    def upsert_product(self, row: dict) -> bool:
+        product_id = row.pop("id", None)
+        if product_id:
+            self.request("PATCH", f"products?id=eq.{product_id}", json=row)
+            return False
+        self.request("POST", "products", json=row)
+        return True
+
+    def deactivate_missing(self, store_code: str, run_id: str) -> int:
+        rows = self.request("PATCH", f"products?store_code=eq.{store_code}&is_active=eq.true&last_seen_run_id=not.eq.{run_id}", headers={"Prefer": "return=representation"}, json={"is_active": False}) or []
+        return len(rows)
+
+    def finish_run(self, run_id: str, status: str, counts: dict, error: str | None = None) -> None:
+        self.request("PATCH", f"crawl_runs?id=eq.{run_id}", json={"status": status, "collected_count": counts["collected"], "inserted_count": counts["inserted"], "updated_count": counts["updated"], "deactivated_count": counts["deactivated"], "error_message": error, "finished_at": datetime.now(timezone.utc).isoformat()})
+
+    def sync_general(self, store_code: str, items: list) -> dict:
+        return sync_catalog(self, store_code, items, complete=True)

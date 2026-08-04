@@ -1,0 +1,37 @@
+name: General Product Crawler
+on:
+  schedule:
+    - cron: "17 18 * * 2,5"
+  workflow_dispatch:
+    inputs:
+      store:
+        description: Store to crawl
+        required: true
+        default: all
+        type: choice
+        options: [all, CU, GS25, EMART24]
+jobs:
+  crawl:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install crawler
+        working-directory: crawler
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Collect and synchronize independently
+        run: python crawler/run_general.py --store "${{ inputs.store || 'all' }}" --upload
+      - name: Upload per-store report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: general-product-report
+          path: crawler/output/general-latest.json

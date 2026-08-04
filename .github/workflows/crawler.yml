@@ -14,16 +14,16 @@ on:
           - all
           - cu
           - gs25
-          - seven
           - emart24
 
 jobs:
   crawl:
+    environment: Production
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
     steps:

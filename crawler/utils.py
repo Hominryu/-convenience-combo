@@ -33,12 +33,27 @@ def parse_price(value: str | None) -> int:
 
 
 def normalize_name(value: str) -> str:
-    value = re.sub(r"\([^)]*\)", " ", value)
-    value = re.sub(r"\[[^\]]*\]", " ", value)
-    value = re.sub(r"\d+(\.\d+)?\s?(g|ml|l|kg|\uac1c\uc785|\uc785)", " ", value, flags=re.I)
+    value = re.sub(r"1\s*\+\s*1|2\s*\+\s*1", " ", value, flags=re.I)
+    value = re.sub(r"[\(\)\[\]{}]", " ", value)
+    # Capacity is stored independently and deliberately remains part of identity.
+    # Only its spelling is removed from the comparable product name.
+    value = re.sub(r"\d+(?:\.\d+)?\s*(?:ml|mL|ML|g|G|l|L|kg|KG|\uac1c\uc785|\uc785)", " ", value)
     value = re.sub(rf"[^{HANGUL_RANGE}a-zA-Z0-9]+", " ", value)
     value = re.sub(r"\s+", " ", value)
     return value.strip().lower()
+
+
+def extract_capacity(value: str) -> str | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(ml|g|kg|l|\uac1c\uc785|\uc785)\b", value, re.I)
+    if not match:
+        return None
+    number, unit = match.groups()
+    unit = unit.lower()
+    if unit == "l":
+        return f"{float(number) * 1000:g}ml"
+    if unit == "kg":
+        return f"{float(number) * 1000:g}g"
+    return f"{number}{unit}"
 
 
 def stable_key(*parts: str) -> str:
