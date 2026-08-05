@@ -1,24 +1,52 @@
-import type { ComboResult } from './combo'
-import type { Purpose, RetailerCode } from './data'
+﻿import type { Purpose, RetailerCode } from './data'
 import { logAdEvent } from './ads/logger'
 
+export type AiComboItem = {
+  id: string
+  name: string
+  price: number
+  category: string
+  promotionType: string
+  purchaseQuantity: number
+  rewardQuantity: number
+  paymentAmount: number
+  receivedQuantity: number
+  benefitAmount: number
+  effectiveUnitPrice: number
+  lastSeenAt: string | null
+}
+
+export type AiCombo = {
+  title: string
+  reason: string
+  retailer: string
+  budget: number
+  purpose: Purpose
+  items: AiComboItem[]
+  paymentAmount: number
+  receivedQuantity: number
+  benefitAmount: number
+  leftover: number
+  lastSeenAt: string | null
+}
+
 type AiComboParams = {
-  combo: ComboResult
   retailer: RetailerCode
   budget: number
   purpose: Purpose
+  excludeProductIds?: string[]
 }
 
 type AiComboResponse = {
   ok?: boolean
   message?: string
+  combinations?: AiCombo[]
+  source?: string
 }
 
 export async function requestAiCombo(params: AiComboParams) {
   const apiBaseUrl = import.meta.env.VITE_COMBO_API_BASE_URL?.replace(/\/$/, '')
-  if (!apiBaseUrl) {
-    return '지금 조합에서 행사상품 비중을 유지하면서, 같은 예산 안에서 카테고리가 겹치지 않게 한 번 더 골라보는 걸 추천해요.'
-  }
+  if (!apiBaseUrl) throw new Error('api_base_url_missing')
 
   logAdEvent('rewarded_ai_requested', {
     retailer: params.retailer,
@@ -32,9 +60,7 @@ export async function requestAiCombo(params: AiComboParams) {
     body: JSON.stringify(params),
   })
 
-  if (!response.ok) {
-    throw new Error('ai_combo_failed')
-  }
+  if (!response.ok) throw new Error('ai_combo_failed')
 
   const data = (await response.json()) as AiComboResponse
   logAdEvent('rewarded_ai_completed', {
@@ -42,7 +68,9 @@ export async function requestAiCombo(params: AiComboParams) {
     budget: params.budget,
     purpose: params.purpose,
     ok: Boolean(data.ok),
+    source: data.source,
   })
 
-  return data.message ?? '예산과 목적에 맞춰 조합을 다시 정리했어요.'
+  if (!data.ok || !data.combinations?.length) throw new Error(data.message ?? 'ai_combo_empty')
+  return data.combinations
 }

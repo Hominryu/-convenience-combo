@@ -1,10 +1,12 @@
--- Reset only this app schema. Running this file deletes existing convenience-combo data.
+﻿-- Reset only this app schema. Running this file deletes existing convenience-combo data.
+-- Use this before production only when you intentionally want a clean database.
+
+-- Drop app objects in dependency order.
 drop table if exists combo_history cascade;
 drop table if exists favorites cascade;
 drop table if exists promotions cascade;
 drop table if exists products cascade;
 drop table if exists crawl_runs cascade;
-drop table if exists retailers cascade;
 drop function if exists set_updated_at() cascade;
 drop type if exists promotion_type cascade;
 drop type if exists product_category cascade;
@@ -14,35 +16,16 @@ drop type if exists store_code cascade;
 
 create extension if not exists "pgcrypto";
 
--- Convenience Combo canonical schema for CU, GS25, and EMART24.
--- Paste this whole file into the Supabase SQL Editor for a fresh project.
+-- Canonical schema for CU, GS25, and EMART24.
+-- Paste this whole file into the Supabase SQL Editor to reset the app DB.
 
-do $$ begin
-  create type store_code as enum ('CU', 'GS25', 'EMART24');
-exception when duplicate_object then null;
-end $$;
+create type store_code as enum ('CU', 'GS25', 'EMART24');
+create type crawl_type as enum ('GENERAL', 'PROMOTION');
+create type crawl_status as enum ('RUNNING', 'SUCCESS', 'PARTIAL_FAILURE', 'FAILED');
+create type product_category as enum ('MAIN_MEAL', 'RAMEN', 'RICE', 'SANDWICH', 'SIDE', 'SNACK', 'DRINK', 'COFFEE', 'DESSERT', 'ALCOHOL_SIDE', 'ETC');
+create type promotion_type as enum ('NONE', 'ONE_PLUS_ONE', 'TWO_PLUS_ONE', 'THREE_PLUS_ONE', 'SALE', 'GIFT', 'NEW');
 
-do $$ begin
-  create type crawl_type as enum ('GENERAL', 'PROMOTION');
-exception when duplicate_object then null;
-end $$;
-
-do $$ begin
-  create type crawl_status as enum ('RUNNING', 'SUCCESS', 'PARTIAL_FAILURE', 'FAILED');
-exception when duplicate_object then null;
-end $$;
-
-do $$ begin
-  create type product_category as enum ('MAIN_MEAL', 'RAMEN', 'RICE', 'SANDWICH', 'SIDE', 'SNACK', 'DRINK', 'COFFEE', 'DESSERT', 'ALCOHOL_SIDE', 'ETC');
-exception when duplicate_object then null;
-end $$;
-
-do $$ begin
-  create type promotion_type as enum ('NONE', 'ONE_PLUS_ONE', 'TWO_PLUS_ONE', 'THREE_PLUS_ONE', 'SALE', 'GIFT', 'NEW');
-exception when duplicate_object then null;
-end $$;
-
-create table if not exists crawl_runs (
+create table crawl_runs (
   id uuid primary key default gen_random_uuid(),
   store_code store_code not null,
   crawl_type crawl_type not null,
@@ -56,7 +39,7 @@ create table if not exists crawl_runs (
   finished_at timestamptz
 );
 
-create table if not exists products (
+create table products (
   id uuid primary key default gen_random_uuid(),
   store_code store_code not null,
   source_product_id text,
@@ -71,20 +54,27 @@ create table if not exists products (
   is_active boolean not null default true,
   last_seen_run_id uuid references crawl_runs(id),
   last_seen_at timestamptz not null default now(),
+  last_seen_general_at timestamptz,
+  last_seen_promotion_at timestamptz,
+  price_verified_at timestamptz,
+  promotion_end_at date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create unique index if not exists products_source_identity
+create unique index products_source_identity
   on products(store_code, source_product_id);
 
-create unique index if not exists products_name_capacity_identity
+create index products_name_capacity_lookup
   on products(store_code, normalized_name, coalesce(capacity, ''));
 
-create index if not exists products_store_active_idx on products(store_code, is_active, original_name);
-create index if not exists products_category_idx on products(category);
+create index products_store_active_idx on products(store_code, is_active, original_name);
+create index products_seen_general_idx on products(store_code, last_seen_general_at desc);
+create index products_seen_promotion_idx on products(store_code, last_seen_promotion_at desc);
+create index products_promotion_end_idx on products(store_code, promotion_end_at desc);
+create index products_category_idx on products(category);
 
-create table if not exists promotions (
+create table promotions (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references products(id) on delete cascade,
   promotion_type promotion_type not null,
@@ -101,9 +91,10 @@ create table if not exists promotions (
   unique(product_id, promotion_type, start_date, end_date)
 );
 
-create index if not exists promotions_product_active_idx on promotions(product_id, is_active, last_seen_at desc);
+create index promotions_product_active_idx on promotions(product_id, is_active, last_seen_at desc);
+create index promotions_end_active_idx on promotions(is_active, end_date desc);
 
-create table if not exists favorites (
+create table favorites (
   id uuid primary key default gen_random_uuid(),
   user_key text not null,
   product_id uuid not null references products(id) on delete cascade,
@@ -111,7 +102,7 @@ create table if not exists favorites (
   unique(user_key, product_id)
 );
 
-create table if not exists combo_history (
+create table combo_history (
   id uuid primary key default gen_random_uuid(),
   user_key text not null,
   store_code store_code not null,
@@ -121,7 +112,7 @@ create table if not exists combo_history (
   created_at timestamptz not null default now()
 );
 
-create or replace function set_updated_at()
+create function set_updated_at()
 returns trigger language plpgsql as $$
 begin
   new.updated_at = now();
@@ -129,13 +120,12 @@ begin
 end;
 $$;
 
-drop trigger if exists products_set_updated_at on products;
 create trigger products_set_updated_at
 before update on products
 for each row execute function set_updated_at();
 
-drop trigger if exists promotions_set_updated_at on promotions;
 create trigger promotions_set_updated_at
 before update on promotions
 for each row execute function set_updated_at();
+
 
